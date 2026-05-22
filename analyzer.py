@@ -16,24 +16,34 @@ log = logging.getLogger(__name__)
 
 
 async def run_analysis() -> dict:
-    log.info("Analyse gestartet")
+    project_ids = settings.project_ids
+    log.info(f"Analyse gestartet für {len(project_ids)} Projekt(e): {project_ids}")
 
-    new_issues = await fetch_new_issues()
-    new_issues = [i for i in new_issues if "bot::prioritätsliste" not in i.get("labels", [])]
+    all_results = []
+    for project_id in project_ids:
+        result = await _analyze_project(project_id)
+        all_results.append({"project_id": project_id, **result})
+
+    return {"status": "ok", "projects": all_results}
+
+
+async def _analyze_project(project_id: str) -> dict:
+    log.info(f"[{project_id}] Analyse gestartet")
+
+    new_issues = await fetch_new_issues(project_id)
 
     if not new_issues:
-        return {"status": "ok", "message": "Keine neuen Issues zu analysieren"}
+        log.info(f"[{project_id}] Keine neuen Issues")
+        return {"message": "Keine neuen Issues zu analysieren"}
 
-    all_open_issues = await fetch_all_open_issues()
-    all_open_issues = [i for i in all_open_issues if "bot::prioritätsliste" not in i.get("labels", [])]
-    closed_issues = await fetch_closed_issues()
-    log.info(f"{len(new_issues)} neue, {len(all_open_issues)} offene gesamt, {len(closed_issues)} geschlossene Issues")
+    all_open_issues = await fetch_all_open_issues(project_id)
+    closed_issues = await fetch_closed_issues(project_id)
+    log.info(f"[{project_id}] {len(new_issues)} neue, {len(all_open_issues)} offene gesamt, {len(closed_issues)} geschlossene Issues")
 
     new_embeddings = embed_issues(new_issues)
     all_open_embeddings = embed_issues(all_open_issues)
     closed_embeddings = embed_issues(closed_issues) if closed_issues else None
 
-    # Neue Issues gegen alle offenen Issues auf Duplikate prüfen
     open_pairs = find_similar_pairs(
         new_issues, new_embeddings,
         all_open_issues, all_open_embeddings,
@@ -41,7 +51,6 @@ async def run_analysis() -> dict:
         settings.duplicate_medium_threshold,
     )
 
-    # Neue Issues gegen geschlossene Issues prüfen
     closed_pairs = []
     if closed_issues and closed_embeddings is not None:
         closed_pairs = find_similar_pairs(
@@ -51,7 +60,6 @@ async def run_analysis() -> dict:
             settings.duplicate_medium_threshold,
         )
 
-    # Duplikat-Verdacht prüfen und kommentieren
     high_duplicates = []
     medium_duplicates = []
     seen_pairs = set()
@@ -78,12 +86,11 @@ async def run_analysis() -> dict:
                 f"- `/duplikat-nein` → Markierung wird entfernt\n\n"
                 f"---\n*Automatisch generiert von gitlab-issue-analyzer*"
             )
-            await post_comment(pair["issue"]["iid"], comment)
-            await set_labels(pair["issue"]["iid"], ["bot::duplikat-prüfen"])
+            await post_comment(project_id, pair["issue"]["iid"], comment)
+            await set_labels(project_id, pair["issue"]["iid"], ["bot::duplikat-prüfen"])
         else:
             medium_duplicates.append({**pair, "reason": result["reason"]})
 
-    # Bereits gefixt in geschlossenen Issues
     already_fixed = []
     for pair in closed_pairs:
         result = await check_duplicate(pair["issue"], pair["similar"])
@@ -97,9 +104,8 @@ async def run_analysis() -> dict:
                 f"**Einschätzung:** {result['reason']}\n\n"
                 f"---\n*Automatisch generiert von gitlab-issue-analyzer*"
             )
-            await post_comment(pair["issue"]["iid"], comment)
+            await post_comment(project_id, pair["issue"]["iid"], comment)
 
-    # Prioritäten für alle offenen Issues berechnen (Batches von 10)
     all_priorities = []
     batch_size = 10
     for i in range(0, len(all_open_issues), batch_size):
@@ -109,18 +115,15 @@ async def run_analysis() -> dict:
 
     all_priorities.sort(key=lambda x: x.get("priority_rank", 999))
 
-    # bot::prio-gesetzt nur auf neue Issues setzen
     for issue in new_issues:
-        await set_labels(issue["iid"], ["bot::prio-gesetzt"])
+        await set_labels(project_id, issue["iid"], ["bot::prio-gesetzt"])
 
-    # Prioritätsliste mit allen offenen Issues erstellen/aktualisieren
-    await create_or_update_priority_issue(_build_report(
+    await create_or_update_priority_issue(project_id, _build_report(
         all_open_issues, all_priorities, medium_duplicates, already_fixed
     ))
 
-    log.info("Analyse abgeschlossen")
+    log.info(f"[{project_id}] Analyse abgeschlossen")
     return {
-        "status": "ok",
         "analyzed": len(new_issues),
         "high_duplicates": len(high_duplicates),
         "medium_duplicates": len(medium_duplicates),

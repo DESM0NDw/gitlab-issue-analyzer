@@ -4,7 +4,11 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     gitlab_url: str = "https://gitlab.com"
     gitlab_token: str
-    gitlab_project_id: str
+    gitlab_project_id: str  # comma-separated for multiple projects
+
+    @property
+    def project_ids(self) -> list[str]:
+        return [x.strip() for x in self.gitlab_project_id.split(",") if x.strip()]
 
     llm_provider: str = "groq"
     groq_api_key: str = ""
