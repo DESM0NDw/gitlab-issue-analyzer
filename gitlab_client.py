@@ -26,7 +26,7 @@ async def fetch_open_issues() -> list[dict]:
                 "state": "opened",
                 "per_page": 100,
                 "page": page,
-                "not[labels]": "bot::analysiert",
+                "not[labels]": "bot::prio-gesetzt",
             })
             if not batch:
                 break

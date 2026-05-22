@@ -18,6 +18,7 @@ async def run_analysis() -> dict:
     log.info("Analyse gestartet")
 
     open_issues = await fetch_open_issues()
+    open_issues = [i for i in open_issues if "bot::prioritätsliste" not in i.get("labels", [])]
     closed_issues = await fetch_closed_issues()
     log.info(f"{len(open_issues)} offene, {len(closed_issues)} geschlossene Issues geladen")
 
