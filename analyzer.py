@@ -3,7 +3,8 @@ from datetime import datetime
 from embedder import embed_issues, find_similar_pairs
 from llm import prioritize_batch, check_duplicate
 from gitlab_client import (
-    fetch_open_issues,
+    fetch_new_issues,
+    fetch_all_open_issues,
     fetch_closed_issues,
     set_labels,
     post_comment,
@@ -17,30 +18,34 @@ log = logging.getLogger(__name__)
 async def run_analysis() -> dict:
     log.info("Analyse gestartet")
 
-    open_issues = await fetch_open_issues()
-    open_issues = [i for i in open_issues if "bot::prioritätsliste" not in i.get("labels", [])]
-    closed_issues = await fetch_closed_issues()
-    log.info(f"{len(open_issues)} offene, {len(closed_issues)} geschlossene Issues geladen")
+    new_issues = await fetch_new_issues()
+    new_issues = [i for i in new_issues if "bot::prioritätsliste" not in i.get("labels", [])]
 
-    if not open_issues:
+    if not new_issues:
         return {"status": "ok", "message": "Keine neuen Issues zu analysieren"}
 
-    open_embeddings = embed_issues(open_issues)
+    all_open_issues = await fetch_all_open_issues()
+    all_open_issues = [i for i in all_open_issues if "bot::prioritätsliste" not in i.get("labels", [])]
+    closed_issues = await fetch_closed_issues()
+    log.info(f"{len(new_issues)} neue, {len(all_open_issues)} offene gesamt, {len(closed_issues)} geschlossene Issues")
+
+    new_embeddings = embed_issues(new_issues)
+    all_open_embeddings = embed_issues(all_open_issues)
     closed_embeddings = embed_issues(closed_issues) if closed_issues else None
 
-    # Duplikate unter offenen Issues finden
+    # Neue Issues gegen alle offenen Issues auf Duplikate prüfen
     open_pairs = find_similar_pairs(
-        open_issues, open_embeddings,
-        open_issues, open_embeddings,
+        new_issues, new_embeddings,
+        all_open_issues, all_open_embeddings,
         settings.duplicate_high_threshold,
         settings.duplicate_medium_threshold,
     )
 
-    # Ähnliche geschlossene Issues finden
+    # Neue Issues gegen geschlossene Issues prüfen
     closed_pairs = []
     if closed_issues and closed_embeddings is not None:
         closed_pairs = find_similar_pairs(
-            open_issues, open_embeddings,
+            new_issues, new_embeddings,
             closed_issues, closed_embeddings,
             settings.duplicate_high_threshold,
             settings.duplicate_medium_threshold,
@@ -94,29 +99,29 @@ async def run_analysis() -> dict:
             )
             await post_comment(pair["issue"]["iid"], comment)
 
-    # Prioritäten erstellen (Batches von 10)
+    # Prioritäten für alle offenen Issues berechnen (Batches von 10)
     all_priorities = []
     batch_size = 10
-    for i in range(0, len(open_issues), batch_size):
-        batch = open_issues[i:i + batch_size]
+    for i in range(0, len(all_open_issues), batch_size):
+        batch = all_open_issues[i:i + batch_size]
         result = await prioritize_batch(batch)
         all_priorities.extend(result)
 
     all_priorities.sort(key=lambda x: x.get("priority_rank", 999))
 
-    # Labels setzen
-    for issue in open_issues:
+    # bot::prio-gesetzt nur auf neue Issues setzen
+    for issue in new_issues:
         await set_labels(issue["iid"], ["bot::prio-gesetzt"])
 
-    # Prioritätsliste als GitLab-Issue erstellen/aktualisieren
+    # Prioritätsliste mit allen offenen Issues erstellen/aktualisieren
     await create_or_update_priority_issue(_build_report(
-        open_issues, all_priorities, medium_duplicates, already_fixed
+        all_open_issues, all_priorities, medium_duplicates, already_fixed
     ))
 
     log.info("Analyse abgeschlossen")
     return {
         "status": "ok",
-        "analyzed": len(open_issues),
+        "analyzed": len(new_issues),
         "high_duplicates": len(high_duplicates),
         "medium_duplicates": len(medium_duplicates),
         "already_fixed": len(already_fixed),

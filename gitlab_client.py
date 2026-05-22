@@ -17,7 +17,8 @@ async def _get(client: httpx.AsyncClient, path: str, params: dict = {}) -> dict 
     return response.json()
 
 
-async def fetch_open_issues() -> list[dict]:
+async def fetch_new_issues() -> list[dict]:
+    """Issues that haven't been through a full analysis run yet."""
     issues = []
     page = 1
     async with httpx.AsyncClient() as client:
@@ -33,6 +34,24 @@ async def fetch_open_issues() -> list[dict]:
             issues.extend(batch)
             page += 1
     return issues[:settings.max_issues]
+
+
+async def fetch_all_open_issues() -> list[dict]:
+    """All open issues, used as comparison base for duplicate detection."""
+    issues = []
+    page = 1
+    async with httpx.AsyncClient() as client:
+        while True:
+            batch = await _get(client, "/issues", {
+                "state": "opened",
+                "per_page": 100,
+                "page": page,
+            })
+            if not batch:
+                break
+            issues.extend(batch)
+            page += 1
+    return issues
 
 
 async def fetch_closed_issues() -> list[dict]:
