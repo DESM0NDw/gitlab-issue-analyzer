@@ -9,6 +9,7 @@ Täglicher Batch-Analyzer der GitLab-Issues auf Duplikate prüft, eine KI-Priori
   - 75–90% Ähnlichkeit: Hinweis in der Prioritätsliste
 - **Bereits behoben**: neue Issues werden gegen geschlossene Issues (letzte 90 Tage) verglichen
 - **KI-Prioritätsliste**: rankt alle offenen Issues per LLM (optional mit Unternehmenskontext) und erstellt/aktualisiert ein GitLab-Issue mit Label `bot::prioritätsliste`
+- **Mehrere Projekte**: ein Analyzer kann beliebig viele GitLab-Projekte gleichzeitig verwalten
 - **Embedding-Cache**: bereits berechnete Embeddings werden gecacht, nur neue/geänderte Issues werden neu eingebettet
 - **LLM-Kosten**: Ranking-Calls laufen nur wenn neue Issues vorhanden sind
 
@@ -16,7 +17,7 @@ Täglicher Batch-Analyzer der GitLab-Issues auf Duplikate prüft, eine KI-Priori
 
 ```
 Neues Issue
-    → gitlab-issue-bot   (type::* + ki-ersteinschätzung::*)
+    → gitlab-issue-bot       (type::* + ki-ersteinschätzung::*)
     → gitlab-issue-analyzer  (+ bot::prio-gesetzt)  ← dieser Bot
     → gitlab-issue-solver    (+ bot::lösungsvorschlag)
 ```
@@ -66,16 +67,24 @@ docker compose up -d --build
 curl -X POST "https://your-domain/analyze"
 ```
 
+## Mehrere Projekte
+
+`GITLAB_PROJECT_ID` akzeptiert kommagetrennte IDs. Jedes Projekt bekommt eine eigene Prioritätsliste und Duplikat-Erkennung:
+
+```env
+GITLAB_PROJECT_ID=12345,67890,11223
+```
+
 ## Konfiguration
 
 | Variable | Standard | Beschreibung |
 |----------|----------|-------------|
 | `GITLAB_URL` | `https://gitlab.com` | GitLab-Instanz URL |
 | `GITLAB_TOKEN` | — | Personal Access Token (Scope: api) |
-| `GITLAB_PROJECT_ID` | — | Projekt-ID |
+| `GITLAB_PROJECT_ID` | — | Projekt-ID(s), kommagetrennt für mehrere |
 | `LLM_PROVIDER` | `groq` | `groq` / `openai` / `mistral` |
 | `GROQ_API_KEY` | — | API-Key für Groq |
-| `MAX_ISSUES` | `100` | Maximale Anzahl Issues pro Lauf |
+| `MAX_ISSUES` | `100` | Maximale Anzahl Issues pro Lauf (pro Projekt) |
 | `CLOSED_ISSUES_DAYS` | `90` | Tage zurück für geschlossene Issues |
 | `API_RATE_LIMIT` | `0.5` | Sekunden zwischen GitLab API-Calls |
 | `DUPLICATE_HIGH_THRESHOLD` | `0.90` | Schwellenwert für direkten Duplikat-Kommentar |
