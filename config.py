@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     duplicate_high_threshold: float = 0.90
     duplicate_medium_threshold: float = 0.75
 
+    business_context: str = ""
+    cache_path: str = "/data/embeddings.pkl"
+
     class Config:
         env_file = ".env"
 

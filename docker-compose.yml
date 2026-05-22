@@ -3,9 +3,14 @@ services:
     build: .
     container_name: gitlab-issue-analyzer
     env_file: .env
+    volumes:
+      - analyzer-data:/data
     networks:
       - 1panel-network
     restart: unless-stopped
+
+volumes:
+  analyzer-data:
 
 networks:
   1panel-network:

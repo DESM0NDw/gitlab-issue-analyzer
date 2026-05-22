@@ -2,17 +2,18 @@ import json
 import httpx
 from config import settings, LLM_CONFIG
 
-PRIORITY_PROMPT = """Du bist ein Issue-Triage-Assistent. Analysiere diese GitLab-Issues und erstelle eine priorisierte Liste.
+_PRIORITY_PROMPT_BASE = """Du bist ein Issue-Triage-Assistent. Analysiere diese GitLab-Issues und erstelle eine priorisierte Liste.
+{context_block}
 Antworte ausschließlich mit JSON:
-{
+{{
   "issues": [
-    {
+    {{
       "iid": <issue_iid>,
       "priority_rank": <1 = höchste Priorität>,
       "reason": "Kurze Begründung auf Deutsch"
-    }
+    }}
   ]
-}"""
+}}"""
 
 DUPLICATE_PROMPT = """Du bist ein Issue-Triage-Assistent. Entscheide ob diese zwei GitLab-Issues Duplikate sind.
 Antworte ausschließlich mit JSON:
@@ -43,10 +44,19 @@ async def _call_llm(messages: list[dict]) -> str:
     return response.json()["choices"][0]["message"]["content"]
 
 
+def _build_priority_prompt() -> str:
+    context_block = (
+        f"Unternehmenskontext:\n{settings.business_context}\n"
+        if settings.business_context
+        else ""
+    )
+    return _PRIORITY_PROMPT_BASE.format(context_block=context_block)
+
+
 async def prioritize_batch(issues: list[dict]) -> list[dict]:
     items = "\n".join([f"- IID {i['iid']}: {i['title']}" for i in issues])
     content = await _call_llm([
-        {"role": "system", "content": PRIORITY_PROMPT},
+        {"role": "system", "content": _build_priority_prompt()},
         {"role": "user", "content": items},
     ])
     return json.loads(content).get("issues", [])

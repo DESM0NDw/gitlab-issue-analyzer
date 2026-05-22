@@ -1,7 +1,12 @@
+import pickle
+import logging
+from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+from config import settings
 
+log = logging.getLogger(__name__)
 _model = None
 
 
@@ -12,10 +17,53 @@ def _get_model() -> SentenceTransformer:
     return _model
 
 
+def _load_cache() -> dict:
+    path = Path(settings.cache_path)
+    if path.exists():
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    return {}
+
+
+def _save_cache(cache: dict) -> None:
+    path = Path(settings.cache_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(cache, f)
+
+
 def embed_issues(issues: list[dict]) -> np.ndarray:
     model = _get_model()
-    texts = [f"{i['title']} {i.get('description') or ''}" for i in issues]
-    return model.encode(texts, show_progress_bar=False)
+    cache = _load_cache()
+
+    embeddings = []
+    to_encode = []
+    updated = False
+
+    for issue in issues:
+        key = f"{issue['iid']}_{issue.get('updated_at', '')}"
+        if key in cache:
+            embeddings.append(cache[key])
+        else:
+            to_encode.append((issue, key))
+            embeddings.append(None)
+
+    if to_encode:
+        texts = [f"{i['title']} {i.get('description') or ''}" for i, _ in to_encode]
+        new_embeddings = model.encode(texts, show_progress_bar=False)
+        idx = 0
+        for i, (issue, key) in enumerate(to_encode):
+            pos = next(j for j, e in enumerate(embeddings) if e is None)
+            cache[key] = new_embeddings[idx]
+            embeddings[pos] = new_embeddings[idx]
+            idx += 1
+        updated = True
+        log.info(f"Embeddings: {len(to_encode)} neu berechnet, {len(issues) - len(to_encode)} aus Cache")
+
+    if updated:
+        _save_cache(cache)
+
+    return np.array(embeddings)
 
 
 def find_similar_pairs(
